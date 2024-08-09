@@ -83,6 +83,7 @@ class VSCodeMise {
   ) {}
 
   async configurePaths() {
+    this.output.appendLine("Configuring paths");
     const tools = await this.getTools();
 
     await Promise.allSettled(
@@ -94,6 +95,7 @@ class VSCodeMise {
         await this.updateConfig(tool);
       })
     );
+    this.output.appendLine("Configuring paths complete");
   }
 
   async getTools() {
@@ -188,9 +190,12 @@ class VSCodeMise {
     if (existsSync(link)) {
       console.log(await readlink(link), tool.install_path);
       if ((await readlink(link)) === tool.install_path) {
-        // @TODO don't throw, return to let you reconfigure when already installed
-        throw Error("Already configured correctly");
+        return;
       } else {
+        this.output.appendLine(
+          `vscode-mise-installs/${tool.name} was symlinked to a different version. ` +
+            `Deleting the old symlink now.`
+        );
         await rm(link);
       }
     }
@@ -199,77 +204,86 @@ class VSCodeMise {
       `${folder?.uri.fsPath}/.vscode/vscode-mise-installs/${tool.name}`,
       "dir"
     );
+    this.output.appendLine(
+      `New symlink created ${folder?.uri.fsPath}/.vscode/vscode-mise-installs/${tool.name} ` +
+        `-> ${tool.install_path}`
+    );
   }
 
   async updateConfig(tool: any) {
     const toolName = `${tool.name}@${tool?.version}`;
-    const configuration = workspace.getConfiguration();
     const extensions = vscode.extensions.all.map((x) => x.id);
 
     if (tool.name === "deno" && extensions.includes("denoland.vscode-deno")) {
-      configuration
-        .update(
-          "deno.path",
-          ".vscode/vscode-mise-installs/deno/bin/deno",
-          ConfigurationTarget.Workspace
-        )
-        .then(async () => {
-          vscode.window.showInformationMessage(
-            `Mise: Configured the extension denoland.vscode-deno to use ${toolName}`
-          );
-          setTimeout(async () => {
-            await vscode.commands.executeCommand("deno.client.restart");
-          }, 500);
-        });
+      return this.configurePlugin({
+        toolName,
+        plugin: "denoland.vscode-deno",
+        configKey: "deno.path",
+        configValue: ".vscode/vscode-mise-installs/deno/bin/deno",
+      });
     }
 
     if (tool.name === "ruff" && extensions.includes("charliermarsh.ruff")) {
-      configuration
-        .update(
-          "ruff.path",
-          [".vscode/vscode-mise-installs/ruff/bin/ruff"],
-          ConfigurationTarget.Workspace
-        )
-        .then(async () => {
-          vscode.window.showInformationMessage(
-            `Mise: Configured the the extension charliermarsh.ruff to use ${toolName}`
-          );
-          setTimeout(async () => {
-            await vscode.commands.executeCommand("ruff.restart");
-          }, 500);
-        });
+      return this.configurePlugin({
+        toolName,
+        plugin: "charliermarsh.ruff",
+        configKey: "ruff.path",
+        configValue: [
+          "${workspaceFolder}/.vscode/vscode-mise-installs/ruff/bin/ruff",
+        ],
+      });
     }
 
     if (tool.name === "go" && extensions.includes("golang.go")) {
-      configuration
-        .update(
-          "go.goroot",
-          "${workspaceFolder}/.vscode/vscode-mise-installs/go",
-          ConfigurationTarget.Workspace
-        )
-        .then(async () => {
-          vscode.window.showInformationMessage(
-            `Mise: Configured the extension golang.go to use ${toolName}`
-          );
-          setTimeout(async () => {
-            await vscode.commands.executeCommand("go.languageserver.restart");
-          }, 500);
-        });
+      return this.configurePlugin({
+        toolName,
+        plugin: "golang.go",
+        configKey: "go.goroot",
+        configValue: "${workspaceFolder}/.vscode/vscode-mise-installs/go",
+      });
     }
 
     if (tool.name === "bun" && extensions.includes("oven.bun-vscode")) {
-      configuration
-        .update(
-          "bun.runtime",
-          ".vscode/vscode-mise-installs/bun/bin/bun",
-          ConfigurationTarget.Workspace
-        )
-        .then(async () => {
-          vscode.window.showInformationMessage(
-            `Mise: Configured the extension oven.bun-vscode to use ${toolName}`
-          );
-        });
+      return this.configurePlugin({
+        toolName,
+        plugin: "oven.bun-vscode",
+        configKey: "bun.runtime",
+        configValue:
+          "${workspaceFolder}/.vscode/vscode-mise-installs/bun/bin/bun",
+      });
     }
+  }
+
+  async configurePlugin({
+    toolName,
+    plugin,
+    configKey,
+    configValue,
+  }: {
+    toolName: string;
+    plugin: string;
+    configKey: string;
+    configValue: any;
+  }) {
+    const configuration = workspace.getConfiguration();
+
+    if (
+      JSON.stringify(configuration.get(configKey)) ===
+      JSON.stringify(configValue)
+    ) {
+      return;
+    }
+
+    return configuration
+      .update(configKey, configValue, ConfigurationTarget.Workspace)
+      .then(async () => {
+        this.output.appendLine(
+          `Configured the extension ${plugin} to use ${toolName}`
+        );
+        vscode.window.showInformationMessage(
+          `Mise: Configured the extension ${plugin} to use ${toolName}`
+        );
+      });
   }
 }
 
